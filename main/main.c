@@ -5,6 +5,8 @@
 #include "driver/spi_master.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "lvgl.h"
+#include "ui.h"
 
 #define MOSI 11
 #define MISO 13

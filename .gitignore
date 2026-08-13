@@ -3,3 +3,4 @@ build/
 ._*
 sdkconfig.old
 .vscode/
+managed_components/

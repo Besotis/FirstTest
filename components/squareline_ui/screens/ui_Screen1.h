@@ -27,19 +27,15 @@ extern lv_obj_t *ui_XLR_test1_button;
 extern lv_obj_t *ui_XLR_test1_lable;
 extern lv_obj_t *ui_XLR_test2_button;
 extern lv_obj_t *ui_XLR_test2_lable;
+extern lv_obj_t *ui_XLR_test3_button;
+extern lv_obj_t *ui_Label14;
 extern lv_obj_t *ui_XLR_info_lable;
 extern lv_obj_t *ui_XLR_test1;
 extern lv_obj_t *ui_Testing1_lable;
-extern lv_obj_t *ui_XLR_test2_menu;
-extern lv_obj_t *ui_XLR_test2_option;
-extern lv_obj_t *ui_test2_male_pluged_button;
-extern lv_obj_t *ui_Male_pluged_lable;
-extern lv_obj_t *ui_test2_female_pluged_button;
-extern lv_obj_t *ui_Female_pluged_lable;
-extern lv_obj_t *ui_XLR_test2_male;
-extern lv_obj_t *ui_XLR_testing2_male_lable;
-extern lv_obj_t *ui_XLR_test2_female;
-extern lv_obj_t *ui_XLR_testing2_female_lable;
+extern lv_obj_t *ui_XLR_test2;
+extern lv_obj_t *ui_testing2_lable;
+extern lv_obj_t *ui_XLR_test3;
+extern lv_obj_t *ui_testing3_lable;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus

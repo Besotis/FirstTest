@@ -59,6 +59,33 @@ static lv_color_t lvgl_buf1[LCD_WIDTH * LVGL_BUF_LINES];
 static lv_disp_drv_t lvgl_disp_drv;
 static lv_indev_drv_t lvgl_indev_drv;
 
+#define TOUCH_MOVE_THRESHOLD 12
+
+/* 50% of the 128 px display height = BACK threshold */
+#define SWIPE_BACK_MIN_PIXELS 35
+
+/* Visual slide limits / animation */
+#define SWIPE_ANIM_TIME_MS 120
+
+static bool touch_was_pressed = false;
+static bool touch_moved = false;
+static lv_point_t touch_press_start = {0, 0};
+static lv_point_t touch_last_point = {0, 0};
+
+/*
+ * Touch read callback only records physical finger movement.
+ * The main LVGL loop performs UI movement/animation.
+ */
+static bool drag_release_pending = false;
+static int drag_release_dx = 0;
+static int drag_release_dy = 0;
+
+static lv_obj_t *drag_obj = NULL;
+static int drag_translate_y = 0;
+static bool nav_animation_running = false;
+static bool nav_animation_back = false;
+static lv_obj_t *nav_animation_obj = NULL;
+
 /* ---------------- LCD low level ---------------- */
 
 static void lcd_cmd(uint8_t value)
@@ -236,18 +263,46 @@ static void lvgl_touch_read_cb(lv_indev_drv_t *indev_drv,
         uint16_t raw_x = touch_read_avg(0xD0, 6);
         uint16_t raw_y = touch_read_avg(0x90, 6);
 
-        /* X inversion was confirmed in the previous touch-dot test. */
         last_point.x = map_clamped(raw_y,
-                           TOUCH_RAW_Y_MIN, TOUCH_RAW_Y_MAX,
-                           0, LCD_WIDTH - 1);
+                                   TOUCH_RAW_Y_MIN, TOUCH_RAW_Y_MAX,
+                                   0, LCD_WIDTH - 1);
 
         last_point.y = map_clamped(raw_x,
-                           TOUCH_RAW_X_MIN, TOUCH_RAW_X_MAX,
-                           0, LCD_HEIGHT - 1);
+                                   TOUCH_RAW_X_MIN, TOUCH_RAW_X_MAX,
+                                   0, LCD_HEIGHT - 1);
+
+        if (!touch_was_pressed) {
+            /* New physical touch */
+            touch_was_pressed = true;
+            touch_moved = false;
+            touch_press_start = last_point;
+            touch_last_point = last_point;
+            drag_release_pending = false;
+        } else {
+            int dx = last_point.x - touch_press_start.x;
+            int dy = last_point.y - touch_press_start.y;
+
+            touch_last_point = last_point;
+
+            int adx = (dx < 0) ? -dx : dx;
+            int ady = (dy < 0) ? -dy : dy;
+
+            if (adx >= TOUCH_MOVE_THRESHOLD ||
+                ady >= TOUCH_MOVE_THRESHOLD) {
+                touch_moved = true;
+            }
+        }
 
         data->point = last_point;
         data->state = LV_INDEV_STATE_PR;
     } else {
+        if (touch_was_pressed) {
+            drag_release_dx = touch_last_point.x - touch_press_start.x;
+            drag_release_dy = touch_last_point.y - touch_press_start.y;
+            drag_release_pending = true;
+        }
+
+        touch_was_pressed = false;
         data->point = last_point;
         data->state = LV_INDEV_STATE_REL;
     }
@@ -363,6 +418,394 @@ static void lvgl_init_all(void)
     );
 }
 
+
+/* ---------------- Navigation ---------------- */
+
+typedef enum {
+    PAGE_MAIN = 0,
+    PAGE_XLR_OPTIONS,
+    PAGE_XLR_TEST1,
+    PAGE_XLR_TEST2_OPTIONS,
+    PAGE_XLR_TEST2_MALE,
+    PAGE_XLR_TEST2_FEMALE,
+} app_page_t;
+
+static app_page_t current_page = PAGE_MAIN;
+
+static void hide_obj(lv_obj_t *obj)
+{
+    if (obj) {
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void show_obj(lv_obj_t *obj)
+{
+    if (obj) {
+        lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void show_page(app_page_t page)
+{
+    /* Hide all top-level pages first */
+    hide_obj(ui_Main_Menu);
+    hide_obj(ui_XLR_test_options_container);
+    hide_obj(ui_XLR_test1);
+    hide_obj(ui_XLR_test2_menu);
+
+    /* Hide all Test 2 subpages */
+    hide_obj(ui_XLR_test2_option);
+    hide_obj(ui_XLR_test2_male);
+    hide_obj(ui_XLR_test2_female);
+
+    switch (page) {
+        case PAGE_MAIN:
+            show_obj(ui_Main_Menu);
+            break;
+
+        case PAGE_XLR_OPTIONS:
+            show_obj(ui_XLR_test_options_container);
+            break;
+
+        case PAGE_XLR_TEST1:
+            show_obj(ui_XLR_test1);
+            break;
+
+        case PAGE_XLR_TEST2_OPTIONS:
+            show_obj(ui_XLR_test2_menu);
+            show_obj(ui_XLR_test2_option);
+            break;
+
+        case PAGE_XLR_TEST2_MALE:
+            show_obj(ui_XLR_test2_menu);
+            show_obj(ui_XLR_test2_male);
+            break;
+
+        case PAGE_XLR_TEST2_FEMALE:
+            show_obj(ui_XLR_test2_menu);
+            show_obj(ui_XLR_test2_female);
+            break;
+
+        default:
+            show_obj(ui_Main_Menu);
+            page = PAGE_MAIN;
+            break;
+    }
+
+    current_page = page;
+}
+
+static bool navigation_click_allowed(void)
+{
+    if (nav_animation_running) {
+        ESP_LOGI(TAG, "RELEASE ignored: navigation animation running");
+        return false;
+    }
+
+    if (touch_moved) {
+        ESP_LOGI(TAG, "RELEASE ignored: touch was a swipe");
+        return false;
+    }
+
+    return true;
+}
+
+static void click_xlr_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) == LV_EVENT_RELEASED) {
+                if (!navigation_click_allowed()) {
+            return;
+        }
+show_page(PAGE_XLR_OPTIONS);
+    }
+}
+
+static void click_test1_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) == LV_EVENT_RELEASED) {
+                if (!navigation_click_allowed()) {
+            return;
+        }
+show_page(PAGE_XLR_TEST1);
+    }
+}
+
+static void click_test2_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) == LV_EVENT_RELEASED) {
+                if (!navigation_click_allowed()) {
+            return;
+        }
+show_page(PAGE_XLR_TEST2_OPTIONS);
+    }
+}
+
+static void click_male_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) == LV_EVENT_RELEASED) {
+                if (!navigation_click_allowed()) {
+            return;
+        }
+show_page(PAGE_XLR_TEST2_MALE);
+    }
+}
+
+static void click_female_cb(lv_event_t *e)
+{
+    if (lv_event_get_code(e) == LV_EVENT_RELEASED) {
+                if (!navigation_click_allowed()) {
+            return;
+        }
+show_page(PAGE_XLR_TEST2_FEMALE);
+    }
+}
+
+static void go_back_one_level(void)
+{
+    switch (current_page) {
+        case PAGE_XLR_OPTIONS:
+            show_page(PAGE_MAIN);
+            break;
+
+        case PAGE_XLR_TEST1:
+            show_page(PAGE_XLR_OPTIONS);
+            break;
+
+        case PAGE_XLR_TEST2_OPTIONS:
+            show_page(PAGE_XLR_OPTIONS);
+            break;
+
+        case PAGE_XLR_TEST2_MALE:
+        case PAGE_XLR_TEST2_FEMALE:
+            show_page(PAGE_XLR_TEST2_OPTIONS);
+            break;
+
+        case PAGE_MAIN:
+        default:
+            break;
+    }
+}
+
+static lv_obj_t *get_active_drag_obj(void)
+{
+    switch (current_page) {
+        case PAGE_XLR_OPTIONS:
+            return ui_XLR_test_options_container;
+
+        case PAGE_XLR_TEST1:
+            return ui_XLR_test1;
+
+        case PAGE_XLR_TEST2_OPTIONS:
+        case PAGE_XLR_TEST2_MALE:
+        case PAGE_XLR_TEST2_FEMALE:
+            /* Move the whole Test2 page, including its visible child */
+            return ui_XLR_test2_menu;
+
+        case PAGE_MAIN:
+        default:
+            return NULL;
+    }
+}
+
+static void set_page_translate_y(lv_obj_t *obj, int y)
+{
+    if (!obj) {
+        return;
+    }
+
+    lv_obj_set_style_translate_y(obj, y, LV_PART_MAIN | LV_STATE_DEFAULT);
+}
+
+static void nav_anim_exec_cb(void *var, int32_t value)
+{
+    lv_obj_t *obj = (lv_obj_t *)var;
+    set_page_translate_y(obj, (int)value);
+    drag_translate_y = (int)value;
+}
+
+static void nav_anim_ready_cb(lv_anim_t *a)
+{
+    (void)a;
+
+    if (nav_animation_obj) {
+        /*
+         * Always restore the old page to its SquareLine base position.
+         * This is important because it may be shown again later.
+         */
+        set_page_translate_y(nav_animation_obj, 0);
+    }
+
+    drag_translate_y = 0;
+    drag_obj = NULL;
+
+    if (nav_animation_back) {
+        go_back_one_level();
+        ESP_LOGI(TAG, "SLIDE -> BACK, page=%d", (int)current_page);
+    }
+
+    nav_animation_back = false;
+    nav_animation_obj = NULL;
+    nav_animation_running = false;
+}
+
+static void start_page_animation(lv_obj_t *obj, int from_y, int to_y, bool do_back)
+{
+    if (!obj) {
+        if (do_back) {
+            go_back_one_level();
+        }
+        return;
+    }
+
+    nav_animation_running = true;
+    nav_animation_back = do_back;
+    nav_animation_obj = obj;
+
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, obj);
+    lv_anim_set_exec_cb(&a, nav_anim_exec_cb);
+    lv_anim_set_values(&a, from_y, to_y);
+    lv_anim_set_time(&a, SWIPE_ANIM_TIME_MS);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_set_ready_cb(&a, nav_anim_ready_cb);
+    lv_anim_start(&a);
+}
+
+static void update_page_drag(void)
+{
+    if (nav_animation_running || current_page == PAGE_MAIN) {
+        return;
+    }
+
+    if (!touch_was_pressed || !touch_moved) {
+        return;
+    }
+
+    int dx = touch_last_point.x - touch_press_start.x;
+    int dy = touch_last_point.y - touch_press_start.y;
+
+    int adx = (dx < 0) ? -dx : dx;
+    int ady = (dy < 0) ? -dy : dy;
+
+    /*
+     * Only turn the touch into page dragging when the motion is primarily
+     * vertical and upward. Downward/sideways movement leaves the page at 0.
+     */
+    if (dy < 0 && ady > adx) {
+        if (!drag_obj) {
+            drag_obj = get_active_drag_obj();
+        }
+
+        if (drag_obj) {
+            if (dy < -LCD_HEIGHT) {
+                dy = -LCD_HEIGHT;
+            }
+
+            drag_translate_y = dy;
+            set_page_translate_y(drag_obj, drag_translate_y);
+        }
+    }
+}
+
+static void finish_page_drag(void)
+{
+    if (!drag_release_pending) {
+        return;
+    }
+
+    drag_release_pending = false;
+
+    if (current_page == PAGE_MAIN || !touch_moved) {
+        drag_obj = NULL;
+        drag_translate_y = 0;
+        return;
+    }
+
+    int dx = drag_release_dx;
+    int dy = drag_release_dy;
+
+    int adx = (dx < 0) ? -dx : dx;
+    int upward = (dy < 0) ? -dy : 0;
+
+    bool vertical_up = (dy < 0) && (upward > adx);
+
+    /*
+     * Dynamic threshold:
+     * require 80% of the actually available distance from the touch start
+     * point to the top of the screen.
+     *
+     * Example:
+     * start Y=120 -> need 96 px
+     * start Y=80  -> need 64 px
+     * start Y=50  -> need 40 px
+     *
+     * A minimum of 35 px avoids accidental BACK gestures near the top edge.
+     */
+    int available_distance = touch_press_start.y;
+    int required_distance = (available_distance * 80) / 100;
+
+    if (required_distance < SWIPE_BACK_MIN_PIXELS) {
+        required_distance = SWIPE_BACK_MIN_PIXELS;
+    }
+
+    bool pass_threshold =
+        vertical_up &&
+        (upward >= required_distance);
+
+    if (!drag_obj) {
+        drag_obj = get_active_drag_obj();
+    }
+
+    if (pass_threshold) {
+        ESP_LOGI(TAG,
+                 "SLIDE release -> BACK: startY=%d dx=%d dy=%d required=%d",
+                 touch_press_start.y, dx, dy, required_distance);
+
+        /*
+         * Continue the page motion off the top, then switch page when
+         * animation finishes.
+         */
+        start_page_animation(drag_obj,
+                             drag_translate_y,
+                             -LCD_HEIGHT,
+                             true);
+    } else {
+        ESP_LOGI(TAG,
+                 "SLIDE release -> CANCEL: startY=%d dx=%d dy=%d required=%d",
+                 touch_press_start.y, dx, dy, required_distance);
+
+        /*
+         * Finger did not pass the dynamic 80% threshold:
+         * animate the page back to its original position.
+         */
+        if (drag_obj && drag_translate_y != 0) {
+            start_page_animation(drag_obj,
+                                 drag_translate_y,
+                                 0,
+                                 false);
+        } else {
+            drag_obj = NULL;
+            drag_translate_y = 0;
+        }
+    }
+}
+
+static void navigation_init(void)
+{
+    /* Click navigation */
+    lv_obj_add_event_cb(ui_XLR_menu_button, click_xlr_cb, LV_EVENT_RELEASED, NULL);
+    lv_obj_add_event_cb(ui_XLR_test1_button, click_test1_cb, LV_EVENT_RELEASED, NULL);
+    lv_obj_add_event_cb(ui_XLR_test2_button, click_test2_cb, LV_EVENT_RELEASED, NULL);
+    lv_obj_add_event_cb(ui_test2_male_pluged_button, click_male_cb, LV_EVENT_RELEASED, NULL);
+    lv_obj_add_event_cb(ui_test2_female_pluged_button, click_female_cb, LV_EVENT_RELEASED, NULL);
+
+
+    /* Force a known initial state regardless of SquareLine Hidden flags. */
+    show_page(PAGE_MAIN);
+}
+
 /* ---------------- Main ---------------- */
 
 void app_main(void)
@@ -376,6 +819,7 @@ void app_main(void)
 
     lvgl_init_all();
     ui_init();
+    navigation_init();
 
     gpio_set_level(PIN_LCD_BL, 1);
 
@@ -383,6 +827,18 @@ void app_main(void)
 
     while (1) {
         lv_timer_handler();
-        vTaskDelay(pdMS_TO_TICKS(5));
+
+        /*
+         * While the finger is moving upward, translate the active page with
+         * the finger. On release either complete BACK or animate back to 0.
+         */
+        update_page_drag();
+        finish_page_drag();
+
+        /*
+         * One FreeRTOS tick is required here. With CONFIG_FREERTOS_HZ=100,
+         * pdMS_TO_TICKS(5) becomes 0 and starves IDLE0/watchdog.
+         */
+        vTaskDelay(1);
     }
 }

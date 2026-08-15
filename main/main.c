@@ -34,7 +34,7 @@
 
 /* Confirmed for this ST7735S module */
 #define LCD_X_OFFSET     1
-#define LCD_Y_OFFSET     2
+#define LCD_Y_OFFSET     2   /* verify after 270 deg rotation */
 #define LCD_INVERSION    0
 
 /* Touch calibration from the working raw test.
@@ -147,7 +147,7 @@ static void lcd_init(void)
     lcd_data8(0x05);                   /* RGB565 */
 
     lcd_cmd(0x36);                     /* MADCTL */
-    lcd_data8(0x60);                   /* portrait */
+    lcd_data8(0xA0);                   /* 270 deg landscape */
 
 #if LCD_INVERSION
     lcd_cmd(0x21);                     /* INVON */
@@ -265,11 +265,11 @@ static void lvgl_touch_read_cb(lv_indev_drv_t *indev_drv,
 
         last_point.x = map_clamped(raw_y,
                                    TOUCH_RAW_Y_MIN, TOUCH_RAW_Y_MAX,
-                                   0, LCD_WIDTH - 1);
+                                   LCD_WIDTH - 1, 0);
 
         last_point.y = map_clamped(raw_x,
                                    TOUCH_RAW_X_MIN, TOUCH_RAW_X_MAX,
-                                   0, LCD_HEIGHT - 1);
+                                   LCD_HEIGHT - 1, 0);
 
         if (!touch_was_pressed) {
             /* New physical touch */
@@ -425,9 +425,8 @@ typedef enum {
     PAGE_MAIN = 0,
     PAGE_XLR_OPTIONS,
     PAGE_XLR_TEST1,
-    PAGE_XLR_TEST2_OPTIONS,
-    PAGE_XLR_TEST2_MALE,
-    PAGE_XLR_TEST2_FEMALE,
+    PAGE_XLR_TEST2,
+    PAGE_XLR_TEST3,
 } app_page_t;
 
 static app_page_t current_page = PAGE_MAIN;
@@ -448,16 +447,12 @@ static void show_obj(lv_obj_t *obj)
 
 static void show_page(app_page_t page)
 {
-    /* Hide all top-level pages first */
+    /* Hide all pages first */
     hide_obj(ui_Main_Menu);
     hide_obj(ui_XLR_test_options_container);
     hide_obj(ui_XLR_test1);
-    hide_obj(ui_XLR_test2_menu);
-
-    /* Hide all Test 2 subpages */
-    hide_obj(ui_XLR_test2_option);
-    hide_obj(ui_XLR_test2_male);
-    hide_obj(ui_XLR_test2_female);
+    hide_obj(ui_XLR_test2);
+    hide_obj(ui_XLR_test3);
 
     switch (page) {
         case PAGE_MAIN:
@@ -472,19 +467,12 @@ static void show_page(app_page_t page)
             show_obj(ui_XLR_test1);
             break;
 
-        case PAGE_XLR_TEST2_OPTIONS:
-            show_obj(ui_XLR_test2_menu);
-            show_obj(ui_XLR_test2_option);
+        case PAGE_XLR_TEST2:
+            show_obj(ui_XLR_test2);
             break;
 
-        case PAGE_XLR_TEST2_MALE:
-            show_obj(ui_XLR_test2_menu);
-            show_obj(ui_XLR_test2_male);
-            break;
-
-        case PAGE_XLR_TEST2_FEMALE:
-            show_obj(ui_XLR_test2_menu);
-            show_obj(ui_XLR_test2_female);
+        case PAGE_XLR_TEST3:
+            show_obj(ui_XLR_test3);
             break;
 
         default:
@@ -514,50 +502,44 @@ static bool navigation_click_allowed(void)
 static void click_xlr_cb(lv_event_t *e)
 {
     if (lv_event_get_code(e) == LV_EVENT_RELEASED) {
-                if (!navigation_click_allowed()) {
+        if (!navigation_click_allowed()) {
             return;
         }
-show_page(PAGE_XLR_OPTIONS);
+
+        show_page(PAGE_XLR_OPTIONS);
     }
 }
 
 static void click_test1_cb(lv_event_t *e)
 {
     if (lv_event_get_code(e) == LV_EVENT_RELEASED) {
-                if (!navigation_click_allowed()) {
+        if (!navigation_click_allowed()) {
             return;
         }
-show_page(PAGE_XLR_TEST1);
+
+        show_page(PAGE_XLR_TEST1);
     }
 }
 
 static void click_test2_cb(lv_event_t *e)
 {
     if (lv_event_get_code(e) == LV_EVENT_RELEASED) {
-                if (!navigation_click_allowed()) {
+        if (!navigation_click_allowed()) {
             return;
         }
-show_page(PAGE_XLR_TEST2_OPTIONS);
+
+        show_page(PAGE_XLR_TEST2);
     }
 }
 
-static void click_male_cb(lv_event_t *e)
+static void click_test3_cb(lv_event_t *e)
 {
     if (lv_event_get_code(e) == LV_EVENT_RELEASED) {
-                if (!navigation_click_allowed()) {
+        if (!navigation_click_allowed()) {
             return;
         }
-show_page(PAGE_XLR_TEST2_MALE);
-    }
-}
 
-static void click_female_cb(lv_event_t *e)
-{
-    if (lv_event_get_code(e) == LV_EVENT_RELEASED) {
-                if (!navigation_click_allowed()) {
-            return;
-        }
-show_page(PAGE_XLR_TEST2_FEMALE);
+        show_page(PAGE_XLR_TEST3);
     }
 }
 
@@ -569,16 +551,9 @@ static void go_back_one_level(void)
             break;
 
         case PAGE_XLR_TEST1:
+        case PAGE_XLR_TEST2:
+        case PAGE_XLR_TEST3:
             show_page(PAGE_XLR_OPTIONS);
-            break;
-
-        case PAGE_XLR_TEST2_OPTIONS:
-            show_page(PAGE_XLR_OPTIONS);
-            break;
-
-        case PAGE_XLR_TEST2_MALE:
-        case PAGE_XLR_TEST2_FEMALE:
-            show_page(PAGE_XLR_TEST2_OPTIONS);
             break;
 
         case PAGE_MAIN:
@@ -596,11 +571,11 @@ static lv_obj_t *get_active_drag_obj(void)
         case PAGE_XLR_TEST1:
             return ui_XLR_test1;
 
-        case PAGE_XLR_TEST2_OPTIONS:
-        case PAGE_XLR_TEST2_MALE:
-        case PAGE_XLR_TEST2_FEMALE:
-            /* Move the whole Test2 page, including its visible child */
-            return ui_XLR_test2_menu;
+        case PAGE_XLR_TEST2:
+            return ui_XLR_test2;
+
+        case PAGE_XLR_TEST3:
+            return ui_XLR_test3;
 
         case PAGE_MAIN:
         default:
@@ -630,8 +605,8 @@ static void nav_anim_ready_cb(lv_anim_t *a)
 
     if (nav_animation_obj) {
         /*
-         * Always restore the old page to its SquareLine base position.
-         * This is important because it may be shown again later.
+         * Restore the old page to its original SquareLine position before
+         * it is shown again later.
          */
         set_page_translate_y(nav_animation_obj, 0);
     }
@@ -690,8 +665,7 @@ static void update_page_drag(void)
     int ady = (dy < 0) ? -dy : dy;
 
     /*
-     * Only turn the touch into page dragging when the motion is primarily
-     * vertical and upward. Downward/sideways movement leaves the page at 0.
+     * Drag only for primarily vertical upward movement.
      */
     if (dy < 0 && ady > adx) {
         if (!drag_obj) {
@@ -732,16 +706,9 @@ static void finish_page_drag(void)
     bool vertical_up = (dy < 0) && (upward > adx);
 
     /*
-     * Dynamic threshold:
-     * require 80% of the actually available distance from the touch start
-     * point to the top of the screen.
-     *
-     * Example:
-     * start Y=120 -> need 96 px
-     * start Y=80  -> need 64 px
-     * start Y=50  -> need 40 px
-     *
-     * A minimum of 35 px avoids accidental BACK gestures near the top edge.
+     * Dynamic BACK threshold:
+     * require 80% of the available distance from the touch start point
+     * to the top of the screen.
      */
     int available_distance = touch_press_start.y;
     int required_distance = (available_distance * 80) / 100;
@@ -763,10 +730,6 @@ static void finish_page_drag(void)
                  "SLIDE release -> BACK: startY=%d dx=%d dy=%d required=%d",
                  touch_press_start.y, dx, dy, required_distance);
 
-        /*
-         * Continue the page motion off the top, then switch page when
-         * animation finishes.
-         */
         start_page_animation(drag_obj,
                              drag_translate_y,
                              -LCD_HEIGHT,
@@ -776,10 +739,6 @@ static void finish_page_drag(void)
                  "SLIDE release -> CANCEL: startY=%d dx=%d dy=%d required=%d",
                  touch_press_start.y, dx, dy, required_distance);
 
-        /*
-         * Finger did not pass the dynamic 80% threshold:
-         * animate the page back to its original position.
-         */
         if (drag_obj && drag_translate_y != 0) {
             start_page_animation(drag_obj,
                                  drag_translate_y,
@@ -795,14 +754,27 @@ static void finish_page_drag(void)
 static void navigation_init(void)
 {
     /* Click navigation */
-    lv_obj_add_event_cb(ui_XLR_menu_button, click_xlr_cb, LV_EVENT_RELEASED, NULL);
-    lv_obj_add_event_cb(ui_XLR_test1_button, click_test1_cb, LV_EVENT_RELEASED, NULL);
-    lv_obj_add_event_cb(ui_XLR_test2_button, click_test2_cb, LV_EVENT_RELEASED, NULL);
-    lv_obj_add_event_cb(ui_test2_male_pluged_button, click_male_cb, LV_EVENT_RELEASED, NULL);
-    lv_obj_add_event_cb(ui_test2_female_pluged_button, click_female_cb, LV_EVENT_RELEASED, NULL);
+    lv_obj_add_event_cb(ui_XLR_menu_button,
+                        click_xlr_cb,
+                        LV_EVENT_RELEASED,
+                        NULL);
 
+    lv_obj_add_event_cb(ui_XLR_test1_button,
+                        click_test1_cb,
+                        LV_EVENT_RELEASED,
+                        NULL);
 
-    /* Force a known initial state regardless of SquareLine Hidden flags. */
+    lv_obj_add_event_cb(ui_XLR_test2_button,
+                        click_test2_cb,
+                        LV_EVENT_RELEASED,
+                        NULL);
+
+    lv_obj_add_event_cb(ui_XLR_test3_button,
+                        click_test3_cb,
+                        LV_EVENT_RELEASED,
+                        NULL);
+
+    /* Known initial state */
     show_page(PAGE_MAIN);
 }
 
@@ -811,8 +783,8 @@ static void navigation_init(void)
 void app_main(void)
 {
     ESP_LOGI(TAG, "ESP32-S3 + ST7735S + Touch + LVGL 8.3.11");
-    ESP_LOGI(TAG, "LCD 128x160, offset X=%d Y=%d",
-             LCD_X_OFFSET, LCD_Y_OFFSET);
+    ESP_LOGI(TAG, "LCD %dx%d, offset X=%d Y=%d",
+             LCD_WIDTH, LCD_HEIGHT, LCD_X_OFFSET, LCD_Y_OFFSET);
 
     hardware_init();
     lcd_init();

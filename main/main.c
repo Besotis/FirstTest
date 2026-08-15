@@ -15,6 +15,8 @@
 #include "lvgl.h"
 #include "ui.h"
 #include "navigation.h"
+#include "brightness.h"
+#include "audio.h"
 
 /* ---------------- Hardware ---------------- */
 
@@ -391,9 +393,17 @@ void app_main(void)
 
     lvgl_init_all();
     ui_init();
+
+    /* LCD backlight PWM on GPIO5, controlled by Settings slider. */
+    brightness_init(PIN_LCD_BL, ui_Brightness_slider);
+
+    /* MAX98357A I2S amplifier: GPIO15/16/17/18. */
+    audio_init();
+
     navigation_init();
 
-    gpio_set_level(PIN_LCD_BL, 1);
+    /* Non-blocking startup "cip cip". */
+    audio_play_startup();
 
     ESP_LOGI(TAG, "SquareLine UI started");
 

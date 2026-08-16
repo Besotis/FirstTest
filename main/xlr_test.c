@@ -109,6 +109,19 @@ static uint16_t scans_in_cycle = 0;
 static uint8_t good_cycles = 0;
 static uint32_t completed_cycles = 0;
 
+/*
+ * Smooth Cable Quality animation.
+ *
+ * Logical quality still advances by 10% every perfect 0.5 s cycle,
+ * but the visible bar moves continuously across the whole 0.5 s window.
+ */
+static int cable_quality_display = 0;
+static int cable_quality_anim_from = 0;
+static int cable_quality_anim_to = 0;
+static int64_t cable_quality_anim_start_us = 0;
+
+#define CABLE_QUALITY_ANIM_US 500000
+
 /* ---------------- GPIO scan helpers ---------------- */
 
 static void set_pin_input_pulldown(gpio_num_t gpio)
@@ -406,6 +419,10 @@ static void publish_completed_cycle(void)
     ui.cable_quality =
         (uint8_t)(good_cycles * (100 / XLR_QUALITY_CYCLES));
 
+    cable_quality_anim_from = cable_quality_display;
+    cable_quality_anim_to = ui.cable_quality;
+    cable_quality_anim_start_us = esp_timer_get_time();
+
     completed_cycles++;
     ui.cycle_number = completed_cycles;
 
@@ -601,6 +618,12 @@ void xlr_test_start(void)
 
     good_cycles = 0;
     completed_cycles = 0;
+
+    cable_quality_display = 0;
+    cable_quality_anim_from = 0;
+    cable_quality_anim_to = 0;
+    cable_quality_anim_start_us = esp_timer_get_time();
+
     reset_cycle_accumulator();
 
     if (ui_result_queue) {
@@ -634,9 +657,13 @@ void xlr_test_start(void)
     lv_bar_set_range(ui_Cable_Quality, 0, 100);
     lv_bar_set_value(ui_Cable_Quality, 0, LV_ANIM_OFF);
 
+    /*
+     * Reuse the existing SquareLine testing-mode label.
+     * Keep text short so it doesn't visually collide with other UI objects.
+     */
     lv_label_set_text(
         ui_XLR_testing_mode_lable,
-        "NORMAL MODE - TESTING BOTH ENDS"
+        "NORMAL"
     );
 
     test_running = true;
@@ -697,11 +724,10 @@ void xlr_test_process(void)
         render_pin_result(ui_Pin2Result, ui.pin[1]);
         render_pin_result(ui_Pin3Result, ui.pin[2]);
 
-        lv_bar_set_value(
-            ui_Cable_Quality,
-            ui.cable_quality,
-            LV_ANIM_ON
-        );
+        /*
+         * The scan task has already scheduled the new visual target.
+         * Do not jump the bar here.
+         */
 
         /*
          * Exactly one high 4000 Hz warning beep for every bad 0.5 s cycle.
@@ -719,4 +745,36 @@ void xlr_test_process(void)
             ui.cycle_had_error ? "FAULT" : "GOOD"
         );
     }
+
+    /*
+     * Time-based interpolation over the entire 500 ms cycle.
+     *
+     * For a good cable the bar flows continuously:
+     * 0->10, then immediately 10->20, then 20->30, ...
+     * with no pause at the 10% boundaries.
+     */
+    int64_t now_us = esp_timer_get_time();
+    int64_t elapsed_us = now_us - cable_quality_anim_start_us;
+
+    if (elapsed_us < 0) {
+        elapsed_us = 0;
+    }
+
+    if (elapsed_us >= CABLE_QUALITY_ANIM_US) {
+        cable_quality_display = cable_quality_anim_to;
+    } else {
+        int delta =
+            cable_quality_anim_to - cable_quality_anim_from;
+
+        cable_quality_display =
+            cable_quality_anim_from +
+            (int)((delta * elapsed_us) / CABLE_QUALITY_ANIM_US);
+    }
+
+    lv_bar_set_value(
+        ui_Cable_Quality,
+        cable_quality_display,
+        LV_ANIM_OFF
+    );
+
 }

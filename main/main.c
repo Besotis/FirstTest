@@ -16,7 +16,8 @@
 #include "ui.h"
 #include "navigation.h"
 #include "brightness.h"
-#include "audio.h"
+#include "buzzer.h"
+#include "vibration.h"
 
 /* ---------------- Hardware ---------------- */
 
@@ -397,13 +398,19 @@ void app_main(void)
     /* LCD backlight PWM on GPIO5, controlled by Settings slider. */
     brightness_init(PIN_LCD_BL, ui_Brightness_slider);
 
-    /* MAX98357A I2S amplifier: GPIO15/16/17/18. */
-    audio_init();
+    /* Passive buzzer on GPIO15. */
+    buzzer_init();
+    vibration_init();
+    vibration_checkbox_init(ui_Vibration_checkbox);
+
+    /* Settings Volume slider -> buzzer volume 0..100%. */
+    buzzer_volume_slider_init(ui_Volume_slider);
 
     navigation_init();
 
-    /* Non-blocking startup "cip cip". */
-    audio_play_startup();
+    /* Startup "cip cip". */
+    buzzer_startup();
+    vibration_startup();
 
     ESP_LOGI(TAG, "SquareLine UI started");
 

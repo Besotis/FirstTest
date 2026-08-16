@@ -1,5 +1,6 @@
 #include "navigation.h"
-#include "audio.h"
+#include "buzzer.h"
+#include "vibration.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -335,7 +336,8 @@ static void settings_thumb_released_cb(lv_event_t *e)
 static void xlr_button_cb(lv_event_t *e)
 {
     if (lv_event_get_code(e) == LV_EVENT_RELEASED && tap_allowed()) {
-        audio_play_click();
+        buzzer_click();
+        vibration_click();
         show_page(PAGE_XLR);
     }
 }
@@ -343,7 +345,8 @@ static void xlr_button_cb(lv_event_t *e)
 static void rj45_button_cb(lv_event_t *e)
 {
     if (lv_event_get_code(e) == LV_EVENT_RELEASED && tap_allowed()) {
-        audio_play_click();
+        buzzer_click();
+        vibration_click();
         show_page(PAGE_RJ45);
     }
 }
@@ -351,7 +354,8 @@ static void rj45_button_cb(lv_event_t *e)
 static void settings_button_cb(lv_event_t *e)
 {
     if (lv_event_get_code(e) == LV_EVENT_RELEASED && tap_allowed()) {
-        audio_play_click();
+        buzzer_click();
+        vibration_click();
         show_page(PAGE_SETTINGS);
     }
 }
@@ -364,7 +368,8 @@ static void settings_back_button_cb(lv_event_t *e)
          * invisible. Next entry therefore starts at the top with no visible
          * bottom->top jump.
          */
-        audio_play_click();
+        buzzer_click();
+        vibration_click();
         show_page(PAGE_MAIN);
         settings_reset_to_top();
     }

@@ -16,6 +16,9 @@ void buzzer_startup(void);
 /* Short UI button click */
 void buzzer_click(void);
 
+/* XLR test warning: one short 4000 Hz beep */
+void buzzer_warning(void);
+
 /* Volume 0..100% */
 void buzzer_set_volume(uint8_t percent);
 uint8_t buzzer_get_volume(void);

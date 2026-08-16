@@ -18,6 +18,7 @@
 #include "brightness.h"
 #include "buzzer.h"
 #include "vibration.h"
+#include "xlr_test.h"
 
 /* ---------------- Hardware ---------------- */
 
@@ -406,6 +407,9 @@ void app_main(void)
     /* Settings Volume slider -> buzzer volume 0..100%. */
     buzzer_volume_slider_init(ui_Volume_slider);
 
+    /* XLR Normal Mode matrix scanner (stays idle until XLR page opens). */
+    xlr_test_init();
+
     navigation_init();
 
     /* Startup "cip cip". */
@@ -418,6 +422,7 @@ void app_main(void)
         lv_timer_handler();
 
         navigation_process();
+        xlr_test_process();
 
         /*
          * One FreeRTOS tick is required here. With CONFIG_FREERTOS_HZ=100,

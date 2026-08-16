@@ -28,6 +28,7 @@ static const char *TAG = "BUZZER";
 typedef enum {
     BUZZER_CMD_CLICK = 0,
     BUZZER_CMD_STARTUP,
+    BUZZER_CMD_WARNING,
 } buzzer_cmd_t;
 
 static QueueHandle_t buzzer_queue = NULL;
@@ -123,6 +124,12 @@ static void play_startup(void)
     buzzer_tone(1650, 70);
 }
 
+static void play_warning(void)
+{
+    /* One distinct high-pitch warning beep per faulty XLR result cycle. */
+    buzzer_tone(4000, 70);
+}
+
 static void buzzer_task(void *arg)
 {
     (void)arg;
@@ -143,6 +150,10 @@ static void buzzer_task(void *arg)
 
                 case BUZZER_CMD_STARTUP:
                     play_startup();
+                    break;
+
+                case BUZZER_CMD_WARNING:
+                    play_warning();
                     break;
 
                 default:
@@ -184,6 +195,11 @@ uint8_t buzzer_get_volume(void)
 void buzzer_click(void)
 {
     queue_sound(BUZZER_CMD_CLICK);
+}
+
+void buzzer_warning(void)
+{
+    queue_sound(BUZZER_CMD_WARNING);
 }
 
 void buzzer_startup(void)

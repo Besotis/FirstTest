@@ -1,6 +1,7 @@
 #include "navigation.h"
 #include "buzzer.h"
 #include "vibration.h"
+#include "xlr_test.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -86,6 +87,16 @@ static void reset_translate(lv_obj_t *obj)
 
 static void show_page(app_page_t page)
 {
+    app_page_t previous_page = current_page;
+
+    /*
+     * XLR Normal test runs continuously only while the XLR test page is
+     * active. It is stopped as soon as BACK/navigation leaves that page.
+     */
+    if (previous_page == PAGE_XLR && page != PAGE_XLR) {
+        xlr_test_stop();
+    }
+
     /*
      * Main Menu, XLR and RJ45 are children of ui_Main_container.
      * Settings is a separate child of ui_Screen1.
@@ -123,6 +134,11 @@ static void show_page(app_page_t page)
     }
 
     current_page = page;
+
+    if (current_page == PAGE_XLR && previous_page != PAGE_XLR) {
+        xlr_test_start();
+    }
+
     ESP_LOGI(TAG, "page=%d", (int)current_page);
 }
 

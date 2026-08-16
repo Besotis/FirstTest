@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "main.c" "navigation.c" "brightness.c" "buzzer.c" "vibration.c"
+    SRCS "main.c" "navigation.c" "brightness.c" "buzzer.c" "vibration.c" "xlr_test.c"
     INCLUDE_DIRS "."
     REQUIRES
         lvgl
